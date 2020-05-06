@@ -58,7 +58,26 @@ module Rafka
     # @return [Fixnum] The number of unflushed messages
     def flush(timeout_ms=5000)
       Rafka.wrap_errors do
-        Integer(@redis.dump(timeout_ms.to_s))
+        redis_read_timeout = @redis._client.options.fetch(:read_timeout, 5.0)
+        loops, remaining_time = timeout_ms.divmod(redis_read_timeout)
+        loop_wait_time = (redis_read_timeout * 1000).to_i
+        remaining_wait_time = (remaining_time * 1000).to_i
+
+        if timeout_ms.zero?
+          loop { return 0 if Integer(@redis.dump(loop_wait_time.to_s)).zero? }
+        end
+
+        unflushed_messages = 0
+        loops.times do
+          unflushed_messages = Integer(@redis.dump(loop_wait_time.to_s))
+          break if unflushed_messages.zero?
+        end
+
+        if remaining_time.zero?
+          unflushed_messages
+        else
+          Integer(@redis.dump(remaining_wait_time.to_s))
+        end
       end
     end
 
